@@ -31,68 +31,42 @@ export async function POST(req: Request) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // Try different model configurations for free tier
-    // Some free tier accounts may need different model names
-    let model;
+
     let reply: string;
-    
+
     try {
-      // First try: gemini-pro with system instruction
-      model = genAI.getGenerativeModel({ 
-        model: 'gemini-pro',
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-1.5-flash',
         systemInstruction: VAMSI_SYSTEM_PROMPT,
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.9,
+          topK: 40,
+          maxOutputTokens: 800,
+        },
       });
+
       const result = await model.generateContent(message);
       const response = await result.response;
       reply = response.text();
-    } catch (firstError: any) {
-      // If that fails, try without system instruction (some free tier may not support it)
-      if (firstError.message?.includes('404') || firstError.message?.includes('not found')) {
-        try {
-          console.log('Trying gemini-pro without system instruction...');
-          model = genAI.getGenerativeModel({ 
-            model: 'gemini-pro',
-          });
-          // Prepend system prompt to the message instead
-          const promptWithSystem = `${VAMSI_SYSTEM_PROMPT}\n\nUser: ${message}\n\nAssistant:`;
-          const result = await model.generateContent(promptWithSystem);
-          const response = await result.response;
-          reply = response.text();
-        } catch (secondError: any) {
-          // If still failing, try with models/ prefix
-          try {
-            console.log('Trying with models/gemini-pro...');
-            model = genAI.getGenerativeModel({ 
-              model: 'models/gemini-pro',
-            });
-            const promptWithSystem = `${VAMSI_SYSTEM_PROMPT}\n\nUser: ${message}\n\nAssistant:`;
-            const result = await model.generateContent(promptWithSystem);
-            const response = await result.response;
-            reply = response.text();
-          } catch (thirdError: any) {
-            console.error('All model attempts failed:', {
-              first: firstError.message,
-              second: secondError.message,
-              third: thirdError.message
-            });
-            // Provide helpful error message
-            const errorMsg = thirdError.message || 'Unknown error';
-            if (errorMsg.includes('404') || errorMsg.includes('not found')) {
-              throw new Error(
-                'Gemini API model not found. Please ensure:\n' +
-                '1. Your API key has the "Generative Language API" enabled in Google Cloud Console\n' +
-                '2. Visit https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com to enable it\n' +
-                '3. Wait a few minutes after enabling, then try again\n' +
-                `Error details: ${errorMsg}`
-              );
-            }
-            throw new Error(`Unable to connect to Gemini API: ${errorMsg}`);
-          }
-        }
-      } else {
-        throw firstError;
+    } catch (error: any) {
+      console.error('Gemini API Error:', error);
+
+      if (error.message?.includes('API key')) {
+        throw new Error('Invalid API key. Please check your GEMINI_API_KEY in .env.local');
       }
+
+      if (error.message?.includes('quota') || error.message?.includes('rate limit')) {
+        throw new Error('API quota exceeded. Please try again in a moment.');
+      }
+
+      if (error.message?.includes('404') || error.message?.includes('not found')) {
+        throw new Error(
+          'Gemini API model not available. Please ensure your API key has access to Generative Language API at https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com'
+        );
+      }
+
+      throw new Error(`Gemini API error: ${error.message || 'Unknown error'}`);
     }
     
     return NextResponse.json({ reply });
